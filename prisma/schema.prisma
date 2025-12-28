@@ -1,0 +1,110 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                   String   @id @default(cuid())
+  auth0Sub             String   @unique
+  email                String?
+  avatarKey            String?  @default("home")
+
+  theme                String   @default("light") // "light" | "dark"
+
+  plan                 String   @default("free")
+  hasStartedFree       Boolean  @default(false)
+
+  stripeCustomerId     String?  @unique
+  stripeSubscriptionId String?  @unique
+  stripeStatus         String?
+  currentPeriodEnd     DateTime?
+  cancelAtPeriodEnd    Boolean  @default(false)
+
+  // --- Fiscalité (profil utilisateur) ---
+  // Tranche marginale d'imposition en % (0, 11, 30, 41, 45)
+  tmi                  Int      @default(30)
+  // Prélèvements sociaux (LMNP micro/réel) ~ 17.2%
+  socialContribRate    Float    @default(0.172)
+
+  createdAt            DateTime @default(now())
+
+  projects             Project[]
+}
+
+model Project {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  name         String
+  city         String
+  propertyType String
+
+  // --- Acquisition ---
+  price           Int
+  notaryFees      Int?
+  renovationCosts Int?
+  // Part terrain non amortissable (ex: 0.15 = 15%)
+  landShareRate   Float? @default(0.15)
+
+  // --- Financement ---
+  contribution Int
+  loanAmount   Int
+  interestRate Float
+  duration     Int
+
+  // --- Revenus ---
+  monthlyRent               Int
+  vacancyRate               Float?
+  rentChargesIncluded       Boolean @default(false)
+  recoverableChargesMonthly Int?
+  otherIncomeMonthly        Int?
+
+  // --- Charges ---
+  propertyTax     Int?
+  coOwnershipFees Int?
+  insurance       Int?
+  maintenance     Int?
+
+  // Charges détaillées
+  propertyManagementFeeRate    Float?
+  propertyManagementFeeMonthly Int?
+  rentGuaranteeInsuranceMonthly Int?
+  accountingFeesAnnual         Int?
+  expectedCapexAnnual          Int?
+
+  // --- Fiscalité par projet ---
+  // "micro" | "real"
+  taxMode   String  @default("micro")
+  furnished Boolean @default(true)
+
+  // --- Amortissements LMNP (réel) ---
+  depreciationAssets DepreciationAsset[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@index([taxMode])
+}
+
+model DepreciationAsset {
+  id        String  @id @default(cuid())
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  // "building" | "works" | "furniture" | "fees"
+  category  String
+  label     String
+  amount    Int
+  years     Int
+
+  createdAt DateTime @default(now())
+
+  @@index([projectId])
+  @@index([category])
+}

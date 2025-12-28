@@ -1,0 +1,32 @@
+back/
+├── src/
+│   ├── server.ts              # démarre le serveur
+│   ├── app.ts                 # express + middlewares globaux
+│
+│   ├── config/
+│   │
+│   ├── core/
+│   │
+│   ├── middlewares/
+│   │
+│   ├── modules/           
+│   │   ├── auth/
+│   │   │
+│   │   ├── project/
+│   │   │
+│   │   ├── billing/
+│   │
+│   ├── db/
+│   │
+│   ├── utils/
+│   │
+│   └── types/
+│
+├── prisma/
+│   ├── migrations/
+│   │
+│   └── schema.prisma
+│
+├── .env
+├── package.json
+└── tsconfig.json

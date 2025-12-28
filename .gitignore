@@ -1,0 +1,9 @@
+.env
+.env.*
+node_modules/
+vendor/
+__pycache__/
+*.log
+.cache/
+.vscode/
+.DS_Store
