@@ -18,6 +18,7 @@
     "stripe": "^20.1.0"
   },
   "devDependencies": {
+    "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
     "@types/node": "^25.0.2",
     "prisma": "^6.19.1",
