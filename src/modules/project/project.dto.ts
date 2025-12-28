@@ -105,7 +105,7 @@ export function parseProjectPayload(body: any): ProjectPayload {
     notaryFees: optNum(body.notaryFees),
     renovationCosts: optNum(body.renovationCosts),
     landShareRate: body.landShareRate != null
-      ? optNum(body.landShareRate) / 100
+      ? num(body.landShareRate, "landShareRate") / 100
       : null,
 
     contribution: num(body.contribution, "contribution"),
