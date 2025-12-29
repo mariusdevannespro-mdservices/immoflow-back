@@ -2,7 +2,7 @@ import puppeteer from "puppeteer"
 
 export async function htmlToPdfBuffer(html: string): Promise<Buffer> {
   const browser = await puppeteer.launch({
-    headless: "new",
+    headless: true,
     args: ["--no-sandbox", "--disable-setuid-sandbox"],
     executablePath: puppeteer.executablePath(), // ← indispensable sur Render
   })
