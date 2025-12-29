@@ -2,8 +2,9 @@ import puppeteer from "puppeteer"
 
 export async function htmlToPdfBuffer(html: string): Promise<Buffer> {
   const browser = await puppeteer.launch({
-    // si ça casse sur Linux serveur, on mettra args + executablePath
+    headless: "new",
     args: ["--no-sandbox", "--disable-setuid-sandbox"],
+    executablePath: puppeteer.executablePath(), // ← indispensable sur Render
   })
 
   try {
