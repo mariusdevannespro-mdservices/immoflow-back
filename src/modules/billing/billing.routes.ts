@@ -1,5 +1,6 @@
 // src/modules/billing/billing.routes.ts
 import { Router } from "express"
+import crypto from "crypto"
 import { checkJwt } from "../../middlewares/auth.middleware"
 import { prisma } from "../../db"
 import { stripe } from "../../stripe"
@@ -22,6 +23,11 @@ router.post("/checkout", checkJwt, async (req, res) => {
 
     const user = await prisma.user.findUnique({ where: { auth0Sub: sub } })
     if (!user) return res.status(404).json({ error: "User not found (call /api/me first)" })
+
+    // ✅ si lifetime, pas besoin de checkout
+    if (user.proPlusLifetime) {
+      return res.status(400).json({ error: "User already has lifetime access" })
+    }
 
     // Stripe customer
     let customerId = user.stripeCustomerId
@@ -71,6 +77,11 @@ router.post("/portal", checkJwt, async (req, res) => {
       return res.status(400).json({ error: "No stripeCustomerId" })
     }
 
+    // ✅ si lifetime, le portal n'a pas trop de sens
+    if (user.proPlusLifetime) {
+      return res.status(400).json({ error: "User has lifetime access (no portal needed)" })
+    }
+
     const portalSession = await stripe.billingPortal.sessions.create({
       customer: user.stripeCustomerId,
       return_url: `${env.FRONT_URL}/post-auth`,
@@ -93,6 +104,7 @@ router.post("/cancel", checkJwt, async (req, res) => {
       return res.status(400).json({ error: "No subscription to cancel" })
     }
 
+    // ✅ si lifetime, on pourrait carrément cancel direct mais on laisse ton flow
     await stripe.subscriptions.update(user.stripeSubscriptionId, {
       cancel_at_period_end: true,
     })
@@ -101,6 +113,87 @@ router.post("/cancel", checkJwt, async (req, res) => {
   } catch (e) {
     console.error(e)
     return res.status(500).json({ error: "Cancel failed" })
+  }
+})
+
+/**
+ * ✅ NEW: POST /api/billing/redeem
+ * body: { code: "XXXX-...." }
+ * effet: plan pro_plus + lifetime
+ */
+router.post("/redeem", checkJwt, async (req, res) => {
+  try {
+    const sub = req.auth?.payload.sub
+    if (!sub) return res.status(401).json({ error: "No auth0 sub" })
+
+    const { code } = req.body as { code?: string }
+    if (!code || typeof code !== "string") {
+      return res.status(400).json({ error: "Missing code" })
+    }
+
+    const user = await prisma.user.findUnique({ where: { auth0Sub: sub } })
+    if (!user) return res.status(404).json({ error: "User not found (call /api/me first)" })
+
+    if (user.proPlusLifetime) {
+      return res.status(400).json({ error: "Already lifetime" })
+    }
+
+    // hash constant (pas de trim bizarre côté serveur : le front doit envoyer propre)
+    const codeHash = crypto.createHash("sha256").update(code).digest("hex")
+
+    // transaction : vérif clé dispo + lock logique
+    const result = await prisma.$transaction(async (tx) => {
+      const key = await tx.licenseKey.findUnique({ where: { codeHash } })
+      if (!key || !key.isActive) {
+        return { ok: false as const, error: "Invalid code" }
+      }
+      if (key.redeemedAt) {
+        return { ok: false as const, error: "Code already used" }
+      }
+
+      // ✅ marque la clé utilisée
+      await tx.licenseKey.update({
+        where: { id: key.id },
+        data: {
+          redeemedAt: new Date(),
+          redeemedById: user.id,
+          isActive: false,
+        },
+      })
+
+      // ✅ upgrade user
+      const updatedUser = await tx.user.update({
+        where: { id: user.id },
+        data: {
+          plan: "pro_plus",
+          proPlusLifetime: true,
+          // on met un status explicite (pratique côté front)
+          stripeStatus: "lifetime",
+          currentPeriodEnd: null,
+          cancelAtPeriodEnd: false,
+        },
+      })
+
+      return { ok: true as const, user: updatedUser }
+    })
+
+    if (!result.ok) {
+      return res.status(400).json({ error: result.error })
+    }
+
+    // ✅ optionnel : si le mec avait déjà un abo Stripe, on le cancel pour éviter de facturer
+    if (user.stripeSubscriptionId) {
+      try {
+        await stripe.subscriptions.cancel(user.stripeSubscriptionId)
+      } catch (e) {
+        console.warn("Stripe subscription cancel after redeem failed:", e)
+      }
+    }
+
+    return res.json({ ok: true, user: result.user })
+  } catch (e: any) {
+    console.error("REDEEM ERROR:", e?.message)
+    return res.status(500).json({ error: "Redeem failed" })
   }
 })
 
@@ -115,6 +208,19 @@ router.get("/summary", checkJwt, async (req, res) => {
 
     const user = await prisma.user.findUnique({ where: { auth0Sub: sub } })
     if (!user) return res.status(404).json({ error: "User not found" })
+
+    // ✅ lifetime => summary simple (pas de Stripe)
+    if (user.proPlusLifetime) {
+      return res.json({
+        plan: "pro_plus",
+        stripeStatus: "lifetime",
+        currentPeriodEnd: null,
+        price: null,
+        interval: null,
+        paymentMethod: null,
+        invoices: [],
+      })
+    }
 
     // pas d’abonnement
     if (!user.stripeCustomerId) {
@@ -138,12 +244,9 @@ router.get("/summary", checkJwt, async (req, res) => {
     // subscription
     let subscription: any = null
     if (user.stripeSubscriptionId) {
-      subscription = await stripe.subscriptions.retrieve(
-        user.stripeSubscriptionId,
-        {
-          expand: ["default_payment_method", "items.data.price"],
-        }
-      )
+      subscription = await stripe.subscriptions.retrieve(user.stripeSubscriptionId, {
+        expand: ["default_payment_method", "items.data.price"],
+      })
     }
 
     // payment method
@@ -160,8 +263,7 @@ router.get("/summary", checkJwt, async (req, res) => {
     }
 
     const priceObj = subscription?.items?.data?.[0]?.price
-    const price =
-      priceObj?.unit_amount != null ? priceObj.unit_amount / 100 : null
+    const price = priceObj?.unit_amount != null ? priceObj.unit_amount / 100 : null
     const interval = priceObj?.recurring?.interval ?? null
 
     return res.json({

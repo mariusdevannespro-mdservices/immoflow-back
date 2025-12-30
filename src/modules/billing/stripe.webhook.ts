@@ -28,7 +28,8 @@ export async function stripeWebhookHandler(req: Request, res: Response) {
 
         if (customerId && subscriptionId) {
           await prisma.user.updateMany({
-            where: { stripeCustomerId: customerId },
+            // ✅ ne touche pas les users lifetime
+            where: { stripeCustomerId: customerId, proPlusLifetime: false },
             data: { stripeSubscriptionId: subscriptionId },
           })
         }
@@ -40,21 +41,20 @@ export async function stripeWebhookHandler(req: Request, res: Response) {
         const sub = event.data.object as any
         const customerId = sub.customer as string
 
-        // ✅ priceId pour distinguer Pro vs Pro+
         const priceId: string | undefined = sub.items?.data?.[0]?.price?.id
 
-        // ✅ mapping plan selon status + priceId
         let plan: Plan = "free"
         const isPaid = sub.status === "active" || sub.status === "trialing"
 
         if (isPaid) {
           if (priceId === env.STRIPE_PRICE_PRO_PLUS) plan = "pro_plus"
           else if (priceId === env.STRIPE_PRICE_PRO) plan = "pro"
-          else plan = "pro" // fallback si price inconnu mais abonnement actif
+          else plan = "pro"
         }
 
         await prisma.user.updateMany({
-          where: { stripeCustomerId: customerId },
+          // ✅ ne touche pas les users lifetime
+          where: { stripeCustomerId: customerId, proPlusLifetime: false },
           data: {
             stripeStatus: sub.status,
             cancelAtPeriodEnd: !!sub.cancel_at_period_end,
@@ -70,7 +70,8 @@ export async function stripeWebhookHandler(req: Request, res: Response) {
         const customerId = sub.customer as string
 
         await prisma.user.updateMany({
-          where: { stripeCustomerId: customerId },
+          // ✅ ne touche pas les users lifetime
+          where: { stripeCustomerId: customerId, proPlusLifetime: false },
           data: {
             stripeStatus: "canceled",
             stripeSubscriptionId: null,
@@ -84,14 +85,14 @@ export async function stripeWebhookHandler(req: Request, res: Response) {
 
       case "invoice.payment_failed": {
         const invoice = event.data.object as any
-
         const customerId = invoice.customer as string | undefined
         const subscriptionId = invoice.subscription as string | undefined
 
         if (!customerId) break
 
         await prisma.user.updateMany({
-          where: { stripeCustomerId: customerId },
+          // ✅ ne touche pas les users lifetime
+          where: { stripeCustomerId: customerId, proPlusLifetime: false },
           data: {
             stripeStatus: "past_due",
             stripeSubscriptionId: subscriptionId ?? null,

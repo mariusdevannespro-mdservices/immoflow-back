@@ -18,6 +18,9 @@ model User {
   plan                 String   @default("free")
   hasStartedFree       Boolean  @default(false)
 
+  // ✅ NEW: lifetime flag
+  proPlusLifetime      Boolean  @default(false)
+
   stripeCustomerId     String?  @unique
   stripeSubscriptionId String?  @unique
   stripeStatus         String?
@@ -25,14 +28,31 @@ model User {
   cancelAtPeriodEnd    Boolean  @default(false)
 
   // --- Fiscalité (profil utilisateur) ---
-  // Tranche marginale d'imposition en % (0, 11, 30, 41, 45)
   tmi                  Int      @default(30)
-  // Prélèvements sociaux (LMNP micro/réel) ~ 17.2%
   socialContribRate    Float    @default(0.172)
 
   createdAt            DateTime @default(now())
 
   projects             Project[]
+  redeemedKeys         LicenseKey[] @relation("RedeemedKeys")
+}
+
+model LicenseKey {
+  id            String   @id @default(cuid())
+
+  // ✅ on stocke un hash, pas le code en clair
+  codeHash      String   @unique
+
+  plan          String   @default("pro_plus") // extensible plus tard
+  isActive      Boolean  @default(true)
+
+  createdAt     DateTime @default(now())
+  redeemedAt    DateTime?
+  redeemedById  String?
+  redeemedBy    User?    @relation("RedeemedKeys", fields: [redeemedById], references: [id], onDelete: SetNull)
+
+  @@index([redeemedById])
+  @@index([isActive])
 }
 
 model Project {
@@ -48,7 +68,6 @@ model Project {
   price           Int
   notaryFees      Int?
   renovationCosts Int?
-  // Part terrain non amortissable (ex: 0.15 = 15%)
   landShareRate   Float? @default(0.15)
 
   // --- Financement ---
@@ -70,19 +89,15 @@ model Project {
   insurance       Int?
   maintenance     Int?
 
-  // Charges détaillées
-  propertyManagementFeeRate    Float?
-  propertyManagementFeeMonthly Int?
+  propertyManagementFeeRate     Float?
+  propertyManagementFeeMonthly  Int?
   rentGuaranteeInsuranceMonthly Int?
-  accountingFeesAnnual         Int?
-  expectedCapexAnnual          Int?
+  accountingFeesAnnual          Int?
+  expectedCapexAnnual           Int?
 
-  // --- Fiscalité par projet ---
-  // "micro" | "real"
   taxMode   String  @default("micro")
   furnished Boolean @default(true)
 
-  // --- Amortissements LMNP (réel) ---
   depreciationAssets DepreciationAsset[]
 
   createdAt DateTime @default(now())
@@ -97,7 +112,6 @@ model DepreciationAsset {
   projectId String
   project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
-  // "building" | "works" | "furniture" | "fees"
   category  String
   label     String
   amount    Int
